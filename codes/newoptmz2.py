@@ -223,6 +223,12 @@ class laser_parameter():
     def laser_flux2(self, x, t) :
         
         def xs(x, x00, t, t00):
+            print('x00 = ' , x00)
+            print('xsp = ' , self.x_span)
+            print('x = ' , x)
+            print('t = ' , t)
+            print('t00 = ' , t00)
+            print('t_span = ' , self.t_span)
             xs0 = phys.n1 * np.exp( -2*(    (x-x00)/self.x_span   )**2  ) * np.exp( -2*(   (t-t00)/self.t_span )**2  ) 
             #xs0[x < -simu.lx / 2] = 0
             #xs0[x > simu.lx / 2] = 0
@@ -301,7 +307,9 @@ class heat_solver():
         self.x = np.linspace(-simu.lx/2, simu.lx/2, num=simu.nx)   ## computation domain is much larger
         self.y = np.linspace(-simu.ly, 0, num=simu.ny) 
         self.nv = simu.ny * simu.nx #number of DOFs
-        self.nv_int = (simu.ny-2)*(simu.nx-2) # number of interior DOFs          
+        self.nv_int = (simu.ny-2)*(simu.nx-2) # number of interior DOFs   
+        
+        self.yy, self.xx = np.meshgrid(self.y, self.x)
 
         self.CFL = simu.dt/ simu.h**2 #?
         self.inv_Ste = 1./phys.Ste #Inverse Stefan Num
@@ -417,6 +425,19 @@ class heat_solver():
         ax.set_xlabel('x [um]')
         ax.set_ylabel('y [um]')
         fig.colorbar(h1)
+        
+    def plot_temperature2(self):
+            
+            xd = len_um(self.xx)
+            yd = len_um(self.yy)
+            ud = temp_dim(self.newtemp2d)
+
+            fig, ax = plt.subplots()
+            h1 = ax.pcolormesh( xd,yd, ud, cmap = 'hot')
+            ax.contour(xd,yd,ud, [self.phys.Tl])
+            ax.set_xlabel('x [um]')
+            ax.set_ylabel('y [um]')
+            fig.colorbar(h1)
     
     def plot_GR(self, t):
         
@@ -441,8 +462,42 @@ class heat_solver():
         ax[1].set_title('R [m/s]')
         fig.colorbar(h2, ax = ax[1])         
       #  plt.savefig('./figs/'+sys.argv[1]+'_GR_frame'+str(t)+'.png',dpi=600, bbox_inches='tight')    
-        plt.close()
-        #plt.show()
+        #plt.close()
+        plt.show()
+    def plot_GR2(self, t):
+            
+        xd = len_um(self.xx)
+        yd = len_um(self.yy)
+
+
+        fig, ax = plt.subplots(1,2,figsize=(12.8,4.8))
+        plt.suptitle('t= %1.2f ms'%(t*self.simu.dt*self.phys.time_scale*1e3))
+      
+        h1 = ax[0].pcolormesh( xd,yd, self.sol_G2, cmap = 'plasma')
+    #  ax[0].contour(xd,yd,Gd, [0])
+        ax[0].set_xlabel('x [um]')
+        ax[0].set_ylabel('y [um]')
+        ax[0].set_title('G [K/um]')
+        fig.colorbar(h1, ax = ax[0])      
+      
+        h2 = ax[1].pcolormesh( xd,yd, 1e-6*self.sol_R2, cmap = 'inferno')
+        #  ax[1].contour(xd,yd,Rd, [0])
+        ax[1].set_xlabel('x [um]')
+        ax[1].set_ylabel('y [um]')
+        ax[1].set_title('R [m/s]')
+        fig.colorbar(h2, ax = ax[1])         
+          #  plt.savefig('./figs/'+sys.argv[1]+'_GR_frame'+str(t)+'.png',dpi=600, bbox_inches='tight')    
+        #plt.close()
+        plt.show()
+        
+    def plot_LaserProfile(self, x_vals, t_vals):
+        fig, ax = plt.subplots()
+        h1 = ax.pcolormesh(x_vals, t_vals, self.qs_vals, cmap='hot')
+        ax.set_xlabel('x [m]')
+        ax.set_ylabel('t [s]')
+        fig.colorbar(h1)
+        plt.show()
+        
 
         
     # def plot_hunt_structure(self, pl, m_targ):
@@ -534,7 +589,12 @@ class heat_solver():
         R = - np.ones((self.simu.nx, self.simu.ny))
         
         start = time.time()
-        while  (iteration < self.iter_max) :
+        t_vals = np.linspace(0, (self.simu.sol_max-1)*self.simu.dt, self.simu.sol_max)  # array of time values
+        x_vals = self.x  # array of x values
+        #while  (iteration < self.iter_max) :
+        self.qs_vals = np.zeros((self.simu.sol_max, len(x_vals)))
+        for iii, t_val in enumerate(t_vals):  
+            
             
             A_l = dphase_trans(u)
             
@@ -543,8 +603,18 @@ class heat_solver():
             b = u + self.inv_Ste*A_l*u 
                        
             u_top = u[-self.simu.nx:]
+            
                         
-            qs = pl.laser_flux2(self.x, t)
+            qs = pl.laser_flux2(self.x, t_val)
+            self.qs_vals[iii,:]= qs
+            
+            if iii%125 == 0 and iii != 0:
+                
+                self.plot_LaserProfile(x_vals, t_vals)
+                
+                
+            
+            
 
             set_top_bc(b, qs, u_top, t, self.CFL, self.phys, self.simu)
             
@@ -572,6 +642,9 @@ class heat_solver():
             #print(self.DNS_window(self.shape_back_2d(unew)))
     
             u = unew
+            self.newtemp = u
+            self.newtemp2d = self.shape_back_2d(u)
+            
             
             t += self.simu.dt
             iteration += 1
@@ -584,7 +657,10 @@ class heat_solver():
                 self.sol_R = len_um(R_s)/self.phys.time_scale 
                 # self.Hunt_struct = self.Hunt_model_Structure()
                 #self.plot_evolution(pl, m_targ, iteration)
-                self.plot_GR(iteration)
+                self.sol_G2 = len_um(G)/self.phys.time_scale 
+                self.sol_R2 = len_um(R)/self.phys.time_scale 
+                #self.plot_GR2(iteration)
+
          #   if iteration%10 == 0:
                 
          #       self.sol_temp = self.DNS_window(self.shape_back_2d(u))
@@ -629,9 +705,13 @@ class heat_solver():
 
 ## settig the estimated scale for power, length and time
 
-Q = 150 * 4 #150 * 2 * 1.78 
-x_span = 50e-6 * 4
-t_span = 0.5e-3 * 3 #5*2
+# Q = 500 #150 * 2 * 1.78 
+# x_span = 50e-6 * 4 #decreasing=> temp high
+# t_span = 0.5e-3 * 4.5 #5*2 #increasing => temp high
+
+Q = 350
+x_span = 50e-6 * 3
+t_span = 0.50e-3 * 4 
 
 
 phys = phys_parameter( Q, x_span, t_span ) #Laser power, rb, t_spot_on
